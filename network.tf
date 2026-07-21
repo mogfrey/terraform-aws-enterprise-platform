@@ -23,9 +23,9 @@ resource "aws_subnet" "private_platform" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name                                      = "${local.name_prefix}-platform-${each.key}"
-    Tier                                      = "platform"
-    "kubernetes.io/role/internal-elb"         = "1"
+    Name                                          = "${local.name_prefix}-platform-${each.key}"
+    Tier                                          = "platform"
+    "kubernetes.io/role/internal-elb"             = "1"
     "kubernetes.io/cluster/${local.name_prefix}" = "shared"
   }
 }
@@ -141,9 +141,9 @@ resource "aws_route_table" "private_platform" {
 }
 
 resource "aws_route" "private_nat" {
-  for_each = var.enable_nat_gateway ? aws_route_table.private_platform : {}
+  for_each = var.enable_nat_gateway ? toset(var.availability_zones) : toset([])
 
-  route_table_id         = each.value.id
+  route_table_id         = aws_route_table.private_platform[each.value].id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.egress[0].id
 }
