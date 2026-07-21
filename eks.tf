@@ -75,11 +75,11 @@ resource "aws_security_group" "eks_cluster" {
 
 resource "aws_security_group" "eks_nodes" {
   name        = "${local.name_prefix}-eks-nodes"
-  description = "Security group for EKS managed nodes"
+  description = "Security group attached to EKS managed nodes"
   vpc_id      = aws_vpc.platform.id
 
   tags = {
-    Name                                      = "${local.name_prefix}-eks-nodes"
+    Name                                          = "${local.name_prefix}-eks-nodes"
     "kubernetes.io/cluster/${local.name_prefix}" = "owned"
   }
 }
@@ -119,7 +119,7 @@ resource "aws_vpc_security_group_egress_rule" "cluster_egress" {
 resource "aws_vpc_security_group_egress_rule" "nodes_egress" {
   security_group_id = aws_security_group.eks_nodes.id
   cidr_ipv4         = "0.0.0.0/0"
-  description       = "Workload egress; restrict further using network policy and approved routes"
+  description       = "Workload egress; effective reachability remains constrained by routes"
   ip_protocol       = "-1"
 }
 
@@ -169,6 +169,51 @@ resource "aws_eks_cluster" "platform" {
   }
 }
 
+resource "aws_launch_template" "eks_nodes" {
+  name_prefix = "${local.name_prefix}-nodes-"
+
+  vpc_security_group_ids = [
+    aws_security_group.eks_nodes.id,
+    aws_eks_cluster.platform.vpc_config[0].cluster_security_group_id
+  ]
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    instance_metadata_tags      = "enabled"
+  }
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+
+    ebs {
+      delete_on_termination = true
+      encrypted             = true
+      volume_size           = 80
+      volume_type           = "gp3"
+    }
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(local.common_tags, {
+      Name = "${local.name_prefix}-worker"
+    })
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags = merge(local.common_tags, {
+      Name = "${local.name_prefix}-worker-volume"
+    })
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-nodes"
+  }
+}
+
 resource "aws_eks_node_group" "platform" {
   cluster_name    = aws_eks_cluster.platform.name
   node_group_name = "platform"
@@ -177,6 +222,11 @@ resource "aws_eks_node_group" "platform" {
   instance_types  = var.node_instance_types
   ami_type        = var.node_ami_type
   capacity_type   = "ON_DEMAND"
+
+  launch_template {
+    id      = aws_launch_template.eks_nodes.id
+    version = aws_launch_template.eks_nodes.latest_version
+  }
 
   scaling_config {
     min_size     = var.node_min_size
@@ -189,7 +239,7 @@ resource "aws_eks_node_group" "platform" {
   }
 
   labels = {
-    workload = "platform"
+    workload  = "platform"
     lifecycle = "on-demand"
   }
 
